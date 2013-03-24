@@ -1,0 +1,19 @@
+<?php
+/**
+ * @file
+ * Installation functions for Google Base.
+ */
+
+
+
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function uc_google_shopping_uninstall() {
+  // Delete the variables we created.
+  variable_del('google_shopping_feed_title');
+  variable_del('google_shopping_feed_description');
+  variable_del('google_shopping_feed_link');
+  
+}

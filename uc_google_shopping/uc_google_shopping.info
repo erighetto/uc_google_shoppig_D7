@@ -1,0 +1,6 @@
+; $Id$
+name = "Google Merchant Center Feed"
+description = "Export products to google merchant center feed"
+core = 7.x
+dependencies[] = uc_product
+

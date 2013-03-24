@@ -1,0 +1,232 @@
+<?php
+// $Id$
+
+/**
+ * Implementation of hook_menu().
+ */
+function uc_google_shopping_menu() {
+  $items = array();
+  $items['admin/store/settings/google_merchant_center'] = array(
+    'title' => 'Google Merchant Center Feed',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('uc_google_shopping_settings_form'),
+    'access arguments' => array('administer store'),
+    'description' => 'Configure the google base feed settings',
+    'type'              => MENU_LOCAL_TASK,
+  );
+  $items['products/google_merchant_center.xml'] = array(
+    'title' => 'Google Merchant Center RSS Feed',
+    'description' => 'Export of products in RSS for Google Merchant Center',
+    'page callback' => 'uc_google_shopping',
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK,
+  );
+
+  return $items;
+}
+
+
+
+/**
+ * Define the admin settings form
+ */
+function uc_google_shopping_settings_form() {
+  $form['google_shopping_feed_title'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Feed Title'),
+    '#default_value' => variable_get('google_shopping_feed_title', 'My Google Merchant Center RSS Feed'),
+  );
+  $form['google_shopping_feed_description'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Feed Description'),
+    '#default_value' => variable_get('google_shopping_feed_description', 'My Google Base Merchant Center Feed Description'),
+  );
+  $form['google_shopping_feed_link'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Feed Link (Usually is the url of shop)'),
+    '#default_value' => variable_get('google_shopping_feed_link', $GLOBALS['base_url']),
+  );
+  
+  return system_settings_form($form);
+}
+
+/**
+ * Custom function to get Zone/Province Name ...
+ * @param int $zone
+ * @return boolean
+ */
+function uc_get_zone_name($zone = NULL) {
+  if (empty($zone)) {
+    return FALSE;
+  }
+
+  $query = db_select('uc_zones', 'z');
+  $query -> condition('zone_id', $zone) -> fields('z', array(
+    'zone_name'
+  ));
+  $result = $query -> execute();
+  $row = $result -> fetchObject();
+  
+  if ($row) {
+    return $row->zone_name;
+  }
+
+  return FALSE;
+}
+
+/**
+ * Custom function to get Country Name ...
+ * @param int $country_id
+ * @return boolean
+ */
+function uc_get_nation_name($country_id = NULL) {
+  if (empty($country_id)) {
+    return FALSE;
+  }
+
+  
+  $query = db_select('uc_countries', 'c');
+  $query -> condition('country_id', $country_id)
+    -> condition('version', '0', '>')
+    -> fields('c', array(
+    'country_name'
+  ));
+  $result = $query -> execute();
+  $row = $result -> fetchObject();
+  
+  if ($row) {
+    return $row->country_name;
+  }
+
+  return FALSE;
+
+}
+
+
+function uc_get_taxonomy_name ($tid) {
+  if (empty($tid)) {
+    return FALSE;
+  }
+
+  
+  $query = db_select('taxonomy_term_data', 't');
+  $query -> condition('tid', $tid)
+    -> fields('t', array(
+    'name'
+  ));
+  $result = $query -> execute();
+  $row = $result -> fetchObject();
+  
+  if ($row) {
+    return $row->name;
+  }
+
+  return FALSE;
+}
+
+
+function render_brand ($tids) {
+
+  if (count($tids)>0) {
+    foreach ($tids as $tid) {
+       $parent = taxonomy_get_parents($tid['tid']);
+       if (count($parent)===0) 
+       {
+      return uc_get_taxonomy_name($tid['tid']);
+      break;
+       } 
+    }
+
+  }
+
+ return FALSE;
+}
+
+
+function render_cat ($tids) {
+  $cat_list = array ();
+
+  if (count($tids)>0) {
+    foreach ($tids as $tid) {
+       $parent = taxonomy_get_parents($tid['tid']);
+       if (count($parent)>0) 
+       {
+       $cat_list [uc_get_taxonomy_name($tid['tid'])] = uc_get_taxonomy_name($tid['tid']);
+       }
+    }
+  }
+
+  return implode(', ',$cat_list);
+}
+       
+
+
+
+/**
+ * Create the google base feed
+ */
+function uc_google_shopping() {
+  
+  //Setting some useful variables
+  $store_zip = variable_get('uc_store_postal_code', '');
+  $store_addy = variable_get('uc_store_street1', '');
+  $store_city = variable_get('uc_store_city', '');
+  $nation = uc_get_nation_name(variable_get('uc_store_country', ''));
+  $province = uc_get_zone_name(variable_get('uc_store_zone', ''));
+
+  
+  
+  // Set header of feed
+  $output = '<?xml version="1.0" encoding="UTF-8" ?>' ."\n";
+  $output .= '<rss version ="2.0" xmlns:g="http://base.google.com/ns/1.0">'."\n";
+  $output .= '<channel>'."\n";
+  $output .= '<title>'. variable_get('google_shopping_feed_title', 'My Google Base RSS Feed') .'</title>'."\n";
+  $output .= '<description>'. variable_get('google_shopping_feed_description', 'My Google Base RSS Feed Description') .'</description>'."\n";
+  $output .= '<link>'. variable_get('google_shopping_feed_link', $GLOBALS['base_url']) .'</link>'."\n";
+
+  // Get active products
+
+  $result = db_query("SELECT n.nid FROM {uc_products} p INNER JOIN {node} n ON p.nid = n.nid WHERE n.status = 1");
+  foreach ($result as $node) { 
+    $product = node_load($node->nid);
+
+
+	// Build google shopping rss
+	$output .= "<item>\n";
+    $output .= "<title>" . check_plain(ucfirst(strtolower($product->title))) . "</title>\n";
+    if (isset($product->taxonomy_catalog)) {
+      $output .= "<g:brand>".render_brand($product->taxonomy_catalog['und'])."</g:brand>\n";
+    } 
+    $output .= "<description>" . check_plain($product->body['und'][0]['safe_value']) . "</description>\n";
+    $output .= "<guid>" . htmlentities($product->model) . "</guid>\n";
+    if (isset($product->field_image_cache) && file_exists($product->field_image_cache['und'][0]['uri'])){
+      $output .= "<g:image_link>" . file_create_url($product->field_image_cache['und'][0]['uri']) . "</g:image_link>\n"; 
+    }
+    $output .= "<link>" . $GLOBALS['base_url'] .'/'. drupal_get_path_alias('node/'. $product->nid) . "</link>\n";
+    if ($product->weight>0) {
+      $output .= "<g:weight>" . $product->weight . ' ' . $product->weight_units . "</g:weight>\n";
+    }
+    $output .= "<g:price>" . uc_currency_format($product->sell_price) ."</g:price>\n";
+    $output .= "<g:product_type>" . check_plain(render_cat($product->taxonomy_catalog['und'])) . "</g:product_type>\n";
+    $output .= "<g:mpn>" . htmlentities($product->model) . "</g:mpn>\n";
+    $output .= "<g:id>" . htmlentities($product->model) . "</g:id>\n";
+    $output .= "<g:location>".$store_addy.", ".$store_city.", ".$store_zip." ".$province. ", ".$nation."</g:location>\n";
+    $output .= "<g:quantity>" . $product->pkg_qty . "</g:quantity>\n";
+    $output .= "<g:condition>new</g:condition>\n";
+    if ($product->shippable == 1) {
+      $output .= "<g:availability>in stock</g:availability>\n";
+    } else {
+      $output .= "<g:availability>out of stock</g:availability>\n";
+    }
+    $output .= "</item>\n";
+	$output .= "\n";
+  }
+	
+  $output .= "</channel>\n";
+  $output .= "</rss>";
+  
+  drupal_add_http_header('Content-Type', 'application/xml');
+  print($output);
+  drupal_exit();
+  
+}
